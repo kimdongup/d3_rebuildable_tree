@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+
+    <title>Collapsible Tree Example</title>
+
+    <style>
+
+	.node text { font: 12px sans-serif; }
+
+	.link {
+	  fill: none;
+	  stroke: #ccc;
+	  stroke-width: 2px;
+	}
+	
+    </style>
+
+  </head>
+
+  <body>
+
+<!-- load the d3.js library -->	
+<script src="http://d3js.org/d3.v3.min.js"></script>
+	
+<script>
+
+
+function build(data){
+  // *********** Convert flat data into a nice tree ***************
+  // create a name: node map
+  var dataMap = data.reduce(function(map, node) {
+	map[node.name] = node;
+	return map;
+  }, {});
+
+  // create the tree array
+  var treeData = [];
+  data.forEach(function(node) {
+	// add to parent
+	var parent = dataMap[node.parent];
+	if (parent) {
+	  // create child array if it doesn't exist
+	  (parent.children || (parent.children = []))
+	    // add node to child array
+		.push(node);
+	} else {
+	  // parent is null or missing
+	  treeData.push(node);
+	}
+  });
+  return treeData;
+}
+
+ // Filter funciton
+function filter(data) {
+  for(var i in data){
+    if(["depth","x","x0","y","y0","parent","size"].indexOf(i) != -1){
+       delete data[i]; 
+    } else if (i === "children") {
+      for (var j in data.children) {
+        data.children[j] = filter(data.children[j])
+      }
+    }  
+  }
+  return data;
+}
+
+function clone(obj){
+    var clonedObjectsArray = [];
+    var originalObjectsArray = []; //used to remove the unique ids when finished
+    var next_objid = 0;
+
+    function objectId(obj) {
+        if (obj == null) return null;
+        if (obj.__obj_id == undefined){
+            obj.__obj_id = next_objid++;
+            originalObjectsArray[obj.__obj_id] = obj;
+        }
+        return obj.__obj_id;
+    }
+
+    function cloneRecursive(obj) {
+        if (null == obj || typeof obj == "string" || typeof obj == "number" || typeof obj == "boolean") return obj;
+
+        // Handle Date
+        if (obj instanceof Date) {
+            var copy = new Date();
+            copy.setTime(obj.getTime());
+            return copy;
+        }
+
+        // Handle Array
+        if (obj instanceof Array) {
+            var copy = [];
+            for (var i = 0; i < obj.length; ++i) {
+                copy[i] = cloneRecursive(obj[i]);
+            }
+            return copy;
+        }
+
+        // Handle Object
+        if (obj instanceof Object) {
+            if (clonedObjectsArray[objectId(obj)] != undefined)
+                return clonedObjectsArray[objectId(obj)];
+
+            var copy;
+            if (obj instanceof Function)//Handle Function
+                copy = function(){return obj.apply(this, arguments);};
+            else
+                copy = {};
+
+            clonedObjectsArray[objectId(obj)] = copy;
+
+            for (var attr in obj)
+                if (attr != "__obj_id" && obj.hasOwnProperty(attr))
+                    copy[attr] = cloneRecursive(obj[attr]);                 
+
+            return copy;
+        }       
+
+
+        throw new Error("Unable to copy obj! Its type isn't supported.");
+    }
+    var cloneObj = cloneRecursive(obj);
+
+
+
+    //remove the unique ids
+    for (var i = 0; i < originalObjectsArray.length; i++)
+    {
+        delete originalObjectsArray[i].__obj_id;
+    };
+
+    return cloneObj;
+}
+
+
+var treeData = [];
+var root = [];
+var ancestors = [];
+var replica = [];
+var data = [];
+
+// load the external data
+d3.json("o.json", function(o) {
+  replica = clone(o);
+  treeData = build(o);
+  root = treeData[0];
+  update(root);
+});
+
+
+
+function update(source) {
+	// ************** Generate the tree diagram	 *****************
+  var margin = {top: 20, right: 120, bottom: 20, left: 120},
+	width = 960 - margin.right - margin.left,
+	height = 500 - margin.top - margin.bottom;
+	
+  var i = 0;
+
+  var tree = d3.layout.tree()
+	.size([height, width]);
+
+  var diagonal = d3.svg.diagonal()
+	.projection(function(d) { return [d.y, d.x]; });
+
+  var svg = d3.select("body").append("svg")
+	.attr("width", width + margin.right + margin.left)
+	.attr("height", height + margin.top + margin.bottom)
+	.append("g")
+	.attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+	
+	
+
+  // Compute the new tree layout.
+  var nodes = tree.nodes(root).reverse(),
+	links = tree.links(nodes);
+
+  // Normalize for fixed-depth.
+  nodes.forEach(function(d) { d.y = d.depth * 180; });
+
+  // Declare the nodes…
+  var node = svg.selectAll("g.node")
+	.data(nodes, function(d) { return d.id || (d.id = ++i); });
+
+  // Enter the nodes.
+  var nodeEnter = node
+	.enter()
+	.append("g")
+	.attr("class", "node")
+	.attr("transform", function(d) { 
+	  return "translate(" + d.y + "," + d.x + ")"; });
+
+  // Enter the circles.
+  nodeEnter.append("circle")
+	.attr('r', 8)
+	.attr("fill", 'green')
+	.on('click', function(nd,i){
+		// Walk parent chain
+		ancestors = [];
+		var p = nd;
+		while (p.parent != "null") {
+			ancestors.unshift(p.name);
+			p = p.parent;
+		}
+		ancestors.unshift(p.name);
+		
+		// reorder json data
+		end = ancestors.shift();
+		while (ancestors.length > 0) {
+			start = ancestors.shift();
+			replica.forEach(function(d) {
+				if (d.name == start && d.parent == end ) {
+					d.name = end; d.parent = start;
+				} 
+			});
+			end = start;
+		}
+		
+		replica.forEach(function(d) {
+			if (d.parent == "null") {
+				d.name = nd.name;
+			}
+		});
+		
+		// redraw
+		data = clone(replica);
+		treeData = build(data);
+		root = treeData[0];
+		d3.select("svg").remove();
+		update(root);
+		
+	});
+
+  // Enter the texts.
+  nodeEnter.append("text")
+	.attr("x", function(d) { 
+	  return d.children || d._children ? -13 : 13; })
+	.attr("dy", ".35em")
+	.attr("text-anchor", function(d) { 
+	  return d.children || d._children ? "end" : "start"; })
+	//.style("fill-opacity", 1)
+	.text(function(d) { return d.name; })
+	.on('click', function(d){
+	  var result = prompt('Change the name of the node',d.name);
+	  if(result) {
+	  	replica.forEach(function(data) {
+			if (data.name == d.name) {
+				data.name = result;
+			}
+			if (data.parent == d.name) {
+				data.parent = result;
+			}
+	    });
+		d.name = result; 
+		nodeEnter.select('text')
+		  .text(function(d){ return d.name; });
+	  }
+
+	});
+	
+  // Declare the links…
+  var link = svg.selectAll("path.link")
+	.data(links, function(d) { return d.target.id; });
+
+  // Enter the links.
+  link.enter().insert("path", "g")
+	  .attr("class", "link")
+	  .attr("d", diagonal);
+}
+
+
+</script>
+	
+  </body>
+</html>
